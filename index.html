@@ -120,7 +120,7 @@
     </style>
 </head>
 <body>
-    <h1>XMC File Encoder/Decoder v0.6</h1>
+    <h1>XMC File Encoder/Decoder v0.86</h1>
     
     <div class="key-status" id="keyStatus">
         Loading key.bin... <span id="keyProgress">⏳</span>
@@ -144,23 +144,24 @@
     </div>
 
     <div id="status"></div>
+    
+    <div style="margin-top: 20px;">
+        <div class="label">Header Bytes (ASCII)</div>
+        <div id="headerBytesAscii" style="font-family: monospace; background-color: #f5f5f5; padding: 10px; border: 1px solid #ccc; margin-bottom: 10px; white-space: pre-wrap; max-height: 150px; overflow-y: auto;"></div>
+        
+        <div class="label">Extracted State Values</div>
+        <div id="stateValues" style="font-family: monospace; background-color: #f5f5f5; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; max-height: 150px; overflow-y: auto;"></div>
+    </div>
 
     <script>
         // Constants
         const MODULUS = 65537;  // 0x10001
-        // Initial state array
-        const INITIAL_STATE = [
-            0x00002D70,  // state[0]
-            0x000036A7,  // state[1]
-            0x0000F859,  // state[2]
-            0x0000507F,  // state[3]
-            0x0000A32C,  // state[4]
-            0x00009A02,  // state[5]
-        ];
 
         // DOM elements
         const inputText = document.getElementById('inputText');
         const outputText = document.getElementById('outputText');
+        const headerBytesAscii = document.getElementById('headerBytesAscii');
+        const stateValues = document.getElementById('stateValues');
         const decodeBtn = document.getElementById('decodeBtn');
         const clearBtn = document.getElementById('clearBtn');
         const copyBtn = document.getElementById('copyBtn');
@@ -231,6 +232,9 @@
                 currentIndex++;
             }
 
+            // Store the starting position to extract header bytes later
+            const headerStartIndex = currentIndex;
+
             // Count '3A' occurrences (hex representation of colon) until we find the 6th one
             let colonCount = 0;
             let searchStartIndex = currentIndex;
@@ -251,6 +255,9 @@
                 throw new Error("Could not find complete setup bytes pattern (expected 6 '3A' markers).");
             }
 
+            // Extract header bytes (the content we were skipping)
+            const headerBytes = xmcContent.substring(headerStartIndex, currentIndex);
+
             // Find the end marker
             const endMarker = '\nSAVING EXAM';
             const endIndex = xmcContent.indexOf(endMarker, currentIndex);
@@ -259,7 +266,9 @@
             }
 
             // Extract just the hex data, removing all whitespace and newlines
-            return xmcContent.substring(currentIndex, endIndex).replace(/[\n\r\s]/g, '');
+            const encryptedData = xmcContent.substring(currentIndex, endIndex).replace(/[\n\r\s]/g, '');
+            
+            return { encryptedData, headerBytes };
         }
 
         // Convert ASCII hex string to bytes (matching xxd -p -r behavior)
@@ -313,6 +322,63 @@
             return resultData;
         }
 
+        // Convert ASCII hex string to readable ASCII text
+        function hexToAscii(hexString) {
+            // Remove any whitespace and make sure we have a clean hex string
+            hexString = hexString.replace(/[\s\n\r]/g, '');
+            
+            let result = '';
+            for (let i = 0; i < hexString.length; i += 2) {
+                const hexByte = hexString.substr(i, 2);
+                const charCode = parseInt(hexByte, 16);
+                
+                // Only convert printable ASCII characters
+                if (charCode >= 32 && charCode <= 126) {
+                    result += String.fromCharCode(charCode);
+                } else if (charCode === 10 || charCode === 13) {
+                    // Handle newlines
+                    result += charCode === 10 ? '\n' : '\r';
+                } else {
+                    // Replace non-printable with a dot
+                    result += '.';
+                }
+            }
+            return result;
+        }
+
+        // Function to extract INITIAL_STATE from header bytes
+        function extractStateFromHeader(headerAscii) {
+            // Create a new array for the extracted state values
+            const extractedState = new Uint32Array(6);
+
+            // Split by colons
+            const parts = headerAscii.split(':');
+            
+            // Check if we have enough parts
+            if (parts.length < 6) {
+                throw new Error("Invalid header format: not enough parts to extract state values");
+            }
+            
+            // Extract state values for indices 0, 1, 2
+            for (let i = 0; i < 3; i++) {
+                const pairIndex = i * 2 + 1; // Get the correct index in parts array (0:value, 1:value, 2:value)
+                
+                if (!parts[pairIndex] || parts[pairIndex].length < 16) {
+                    throw new Error(`Invalid header format: missing or incomplete value pair at index ${i}`);
+                }
+                
+                // Each part contains 2 8-character hex values
+                // First 8 chars = state[i+3], Second 8 chars = state[i]
+                const value1 = parts[pairIndex].substring(0, 8); // state[i+3]
+                const value2 = parts[pairIndex].substring(8, 16); // state[i]
+                
+                extractedState[i+3] = parseInt(value1, 16);
+                extractedState[i] = parseInt(value2, 16);
+            }
+            
+            return extractedState;
+        }
+
         // Function to decode XMC content
         function decodeXmc() {
             try {
@@ -327,16 +393,35 @@
                 }
 
                 // Extract the encrypted data (just the hex bytes)
-                const encryptedHex = extractEncryptedData(xmcContent);
+                const { encryptedData: encryptedHex, headerBytes } = extractEncryptedData(xmcContent);
+                
+                // Convert header to ASCII and display
+                const headerAscii = hexToAscii(headerBytes);
+                headerBytesAscii.textContent = headerAscii;
+                
+                // Extract state values from header
+                let extractedState;
+                try {
+                    extractedState = extractStateFromHeader(headerAscii);
+                    
+                    // Display extracted state values in the dedicated element
+                    let stateText = '';
+                    for (let i = 0; i < 6; i++) {
+                        const hexValue = '0x' + extractedState[i].toString(16).padStart(8, '0');
+                        stateText += `state[${i}] = ${hexValue}\n`;
+                    }
+                    stateValues.textContent = stateText;
+                } catch (error) {
+                    console.error("Error extracting state:", error);
+                    showStatus("Error extracting state: " + error.message, 'error');
+                    return; // Exit if we can't extract the state
+                }
                 
                 // Convert hex string to raw bytes (like xxd -p -r would do)
                 const dataBytes = hexStringToBytes(encryptedHex);
                 
-                // Make a copy of the initial state
-                const state = new Uint32Array(INITIAL_STATE);
-                
-                // Perform the 3-pass XOR transformation
-                const decryptedBytes = tripleXor(dataBytes, keyData, state, false);
+                // Use the extracted state for decryption
+                const decryptedBytes = tripleXor(dataBytes, keyData, extractedState, false);
                 
                 // Convert decrypted bytes to text (equivalent to cat plaintext.out)
                 const decoder = new TextDecoder('utf-8');
@@ -361,6 +446,8 @@
         clearBtn.addEventListener('click', () => {
             inputText.value = '';
             outputText.value = '';
+            headerBytesAscii.textContent = '';
+            stateValues.textContent = '';
             showStatus('');
             updateButtonState();
         });
