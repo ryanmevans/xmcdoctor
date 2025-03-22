@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XMC File Encoder</title>
+    <title>XMC File Encoder/Decoder</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -78,6 +78,14 @@
         .success {
             color: #27ae60;
         }
+        .warning {
+            color: #f39c12;
+        }
+        .key-status {
+            text-align: center;
+            margin: 20px 0;
+            font-style: italic;
+        }
         .instructions {
             background-color: #ecf0f1;
             padding: 15px;
@@ -94,42 +102,43 @@
             background-color: #e0e6ed;
             border-radius: 4px;
         }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background-color: #ddd;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+        }
+        .tab.active {
+            background-color: #3498db;
+            color: white;
+        }
     </style>
 </head>
 <body>
-    <h1>XMC File Encoder</h1>
+    <h1>XMC File Encoder/Decoder v0.6</h1>
     
-    <details>
-        <summary>Instructions & Info</summary>
-        <div class="instructions">
-            <p>This tool helps process XMC exam files by transforming them between plaintext and encoded formats:</p>
-            <ol>
-                <li>Paste your plain content in the left textarea</li>
-                <li>Click "Encode" to generate an XMC file on the right</li>
-            </ol>
-            <p>The tool automatically handles:</p>
-            <ul>
-                <li>Converting bytes for processing</li>
-                <li>Applying the XOR encryption algorithm</li>
-                <li>Adding appropriate headers and footers</li>
-            </ul>
-            <p>Note: This tool assumes the key.bin file is already present in the repository.</p>
-        </div>
-    </details>
+    <div class="key-status" id="keyStatus">
+        Loading key.bin... <span id="keyProgress">⏳</span>
+    </div>
 
     <div class="container">
         <div class="input-area">
-            <div class="label">Plain Text</div>
-            <textarea id="inputText" placeholder="Paste plain content here..."></textarea>
+            <div class="label" id="leftLabel">Input (Encrypted XMC File)</div>
+            <textarea id="inputText" placeholder="Paste encrypted XMC content here..."></textarea>
         </div>
         <div class="output-area">
-            <div class="label">Output (Encoded XMC File)</div>
-            <textarea id="outputText" placeholder="Encoded content will appear here..." readonly></textarea>
+            <div class="label" id="rightLabel">Output (Decrypted Content)</div>
+            <textarea id="outputText" placeholder="Decrypted content will appear here..."></textarea>
         </div>
     </div>
 
     <div class="buttons">
-        <button id="encodeBtn">Encode</button>
+        <button id="decodeBtn" disabled>Decode</button>
         <button id="clearBtn">Clear Both</button>
         <button id="copyBtn">Copy Output</button>
     </div>
@@ -152,15 +161,126 @@
         // DOM elements
         const inputText = document.getElementById('inputText');
         const outputText = document.getElementById('outputText');
-        const encodeBtn = document.getElementById('encodeBtn');
+        const decodeBtn = document.getElementById('decodeBtn');
         const clearBtn = document.getElementById('clearBtn');
         const copyBtn = document.getElementById('copyBtn');
         const statusDiv = document.getElementById('status');
+        const keyStatusDiv = document.getElementById('keyStatus');
+        const keyProgressSpan = document.getElementById('keyProgress');
+        const leftLabel = document.getElementById('leftLabel');
+        const rightLabel = document.getElementById('rightLabel');
+
+        // Global variables
+        let keyData = null;
 
         // Function to show a status message
-        function showStatus(message, isError = false) {
+        function showStatus(message, type = 'success') {
             statusDiv.textContent = message;
-            statusDiv.className = isError ? 'error' : 'success';
+            statusDiv.className = type;
+        }
+
+        // Function to enable/disable buttons based on key availability
+        function updateButtonState() {
+            const hasKey = keyData !== null;
+            const hasInput = inputText.value.trim().length > 0;
+            decodeBtn.disabled = !hasKey || !hasInput;
+        }
+
+        // Load key.bin
+        async function loadKeyFile() {
+            try {
+                keyProgressSpan.textContent = "⏳";
+                const response = await fetch('key.bin');
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to load key.bin (HTTP ${response.status})`);
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                keyData = new Uint8Array(arrayBuffer);
+                
+                keyStatusDiv.textContent = `✅ Key loaded successfully (${keyData.length} bytes)`;
+                keyStatusDiv.className = 'key-status success';
+                
+                // Enable buttons
+                updateButtonState();
+                
+                showStatus("Key.bin loaded successfully. You can now decode XMC files.");
+                
+            } catch (error) {
+                keyProgressSpan.textContent = "❌";
+                keyStatusDiv.textContent = `Error loading key.bin: ${error.message}`;
+                keyStatusDiv.className = 'key-status error';
+                
+                showStatus(`Could not load key.bin. Make sure it exists in the same directory as this HTML file. Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Function to extract encrypted data from the XMC file content
+        function extractEncryptedData(xmcContent) {
+            // Find the :START: marker
+            const startMarker = ':START:';
+            const startMarkerIndex = xmcContent.indexOf(startMarker);
+            if (startMarkerIndex === -1) {
+                throw new Error("Could not find :START: marker in XMC file.");
+            }
+
+            // Move past the :START: marker and any whitespace
+            let currentIndex = startMarkerIndex + startMarker.length;
+            while (currentIndex < xmcContent.length && /\s/.test(xmcContent[currentIndex])) {
+                currentIndex++;
+            }
+
+            // Count '3A' occurrences (hex representation of colon) until we find the 6th one
+            let colonCount = 0;
+            let searchStartIndex = currentIndex;
+            
+            while (colonCount < 6 && searchStartIndex < xmcContent.length - 1) {
+                const nextColon = xmcContent.indexOf('3A', searchStartIndex);
+                if (nextColon === -1) break;
+                
+                colonCount++;
+                searchStartIndex = nextColon + 2;  // Move past this '3A'
+                
+                if (colonCount === 6) {
+                    currentIndex = searchStartIndex;  // Position after the last 3A
+                }
+            }
+
+            if (colonCount < 6) {
+                throw new Error("Could not find complete setup bytes pattern (expected 6 '3A' markers).");
+            }
+
+            // Find the end marker
+            const endMarker = '\nSAVING EXAM';
+            const endIndex = xmcContent.indexOf(endMarker, currentIndex);
+            if (endIndex === -1) {
+                throw new Error("Could not find end of encrypted data.");
+            }
+
+            // Extract just the hex data, removing all whitespace and newlines
+            return xmcContent.substring(currentIndex, endIndex).replace(/[\n\r\s]/g, '');
+        }
+
+        // Convert ASCII hex string to bytes (matching xxd -p -r behavior)
+        function hexStringToBytes(hexString) {
+            // Remove any non-hex characters
+            hexString = hexString.replace(/[^0-9A-Fa-f]/g, '');
+            
+            if (hexString.length % 2 !== 0) {
+                throw new Error("Hex string must have an even number of characters.");
+            }
+            
+            // Create a buffer to hold the bytes
+            const byteArray = new Uint8Array(hexString.length / 2);
+            
+            // Convert each pair of hex chars to a byte
+            for (let i = 0; i < byteArray.length; i++) {
+                const hexByte = hexString.substring(i * 2, i * 2 + 2);
+                byteArray[i] = parseInt(hexByte, 16);
+            }
+            
+            return byteArray;
         }
 
         // Convert bytes to ASCII hex string
@@ -170,67 +290,79 @@
                 .join('');
         }
 
-        // Function to encode plain text to XMC format
-        async function encodeXmc() {
+        // The 3-pass XOR transformation function
+        function tripleXor(data, key, state, encrypt = false) {
+            // Make a copy of the state array and data to avoid modifying the originals
+            const workingState = new Uint32Array(state);
+            const resultData = new Uint8Array(data);
+            
+            // Always process in decrypt order (2,1,0) since we're just doing XOR
+            for (let i = 2; i >= 0; i--) {
+                for (let idx = 0; idx < resultData.length; idx++) {
+                    // XOR byte with key[state[i]]
+                    resultData[idx] ^= key[workingState[i]];
+                    
+                    // Update state[i] = (state[i] + state[i+3]) mod MODULUS
+                    workingState[i] = (workingState[i] + workingState[i + 3]);
+                    if (workingState[i] >= MODULUS) {
+                        workingState[i] -= MODULUS;
+                    }
+                }
+            }
+            
+            return resultData;
+        }
+
+        // Function to decode XMC content
+        function decodeXmc() {
             try {
-                // Get the plain text
-                const plainText = inputText.value;
-                if (!plainText) {
-                    throw new Error("Please enter plain text in the input area to encode.");
+                if (!keyData) {
+                    throw new Error("No key data loaded. Please wait for key.bin to load.");
                 }
 
-                // Convert text to bytes
-                const encoder = new TextEncoder();
-                const dataBytes = encoder.encode(plainText);
-                
-                try {
-                    // Simulate the encryption (without actually loading key.bin)
-                    // This just creates a mock encrypted result for demonstration
-                    showStatus("Processing text... (simulating encryption without key.bin)");
+                // Get the input text
+                const xmcContent = inputText.value;
+                if (!xmcContent) {
+                    throw new Error("Please paste XMC content in the input area.");
+                }
 
-                    // Create a mock encrypted output
-                    const mockEncryptedBytes = new Uint8Array(dataBytes.length);
-                    for (let i = 0; i < dataBytes.length; i++) {
-                        // Simple XOR with position (just for demonstration)
-                        mockEncryptedBytes[i] = dataBytes[i] ^ (i % 256);
-                    }
-                    
-                    // Convert encrypted bytes to hex string
-                    const encryptedHex = bytesToHexString(mockEncryptedBytes);
-                    
-                    // Format as XMC file content
-                    const setupBytes = `303A303030303530374630303030324437303A313A303030304133324330303030333641373A323A303030303941303230303030463835393A`;
-                    
-                    const xmcContent = 
-                        "; TEST CLASS: TEST ASSIGNMENT\n\n" +
-                        "; Name: Test User\n\n" +
-                        ":START:\n" +
-                        setupBytes +
-                        encryptedHex +
-                        "\n\nSAVING EXAM ... \n\n" +
-                        "; TEST CLASS: TEST ASSIGNMENT";
-                    
-                    // Display the result
-                    outputText.value = xmcContent;
-                    showStatus(`Successfully simulated encoding of ${dataBytes.length} bytes. (Note: This is just a simulation since key.bin must be loaded server-side)`);
-                    
+                // Extract the encrypted data (just the hex bytes)
+                const encryptedHex = extractEncryptedData(xmcContent);
+                
+                // Convert hex string to raw bytes (like xxd -p -r would do)
+                const dataBytes = hexStringToBytes(encryptedHex);
+                
+                // Make a copy of the initial state
+                const state = new Uint32Array(INITIAL_STATE);
+                
+                // Perform the 3-pass XOR transformation
+                const decryptedBytes = tripleXor(dataBytes, keyData, state, false);
+                
+                // Convert decrypted bytes to text (equivalent to cat plaintext.out)
+                const decoder = new TextDecoder('utf-8');
+                try {
+                    const decryptedText = decoder.decode(decryptedBytes);
+                    outputText.value = decryptedText;
+                    showStatus(`Successfully decrypted ${dataBytes.length} bytes.`);
                 } catch (error) {
-                    throw new Error(`Error during encoding simulation: ${error.message}`);
+                    outputText.value = bytesToHexString(decryptedBytes);
+                    showStatus("Warning: Could not decode as UTF-8 text. Showing raw bytes.", 'warning');
                 }
                 
             } catch (error) {
-                showStatus(`Error: ${error.message}`, true);
+                showStatus(`Error: ${error.message}`, 'error');
                 console.error(error);
             }
         }
 
         // Event listeners
-        encodeBtn.addEventListener('click', encodeXmc);
+        decodeBtn.addEventListener('click', decodeXmc);
         
         clearBtn.addEventListener('click', () => {
             inputText.value = '';
             outputText.value = '';
             showStatus('');
+            updateButtonState();
         });
         
         copyBtn.addEventListener('click', () => {
@@ -238,6 +370,12 @@
             document.execCommand('copy');
             showStatus('Output copied to clipboard!');
         });
+        
+        // Input change listeners to update button state
+        inputText.addEventListener('input', updateButtonState);
+        
+        // Initialize by loading the key file
+        loadKeyFile();
     </script>
 </body>
 </html>
