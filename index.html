@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XMC File Encoder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f7f9fc;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .input-area, .output-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 16px;
+        }
+        textarea {
+            height: 400px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            resize: vertical;
+        }
+        .buttons {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        #status {
+            text-align: center;
+            margin-top: 10px;
+            font-weight: bold;
+            min-height: 20px;
+        }
+        .error {
+            color: #e74c3c;
+        }
+        .success {
+            color: #27ae60;
+        }
+        .instructions {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        details {
+            margin-bottom: 20px;
+        }
+        summary {
+            font-weight: bold;
+            cursor: pointer;
+            padding: 10px;
+            background-color: #e0e6ed;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>XMC File Encoder</h1>
+    
+    <details>
+        <summary>Instructions & Info</summary>
+        <div class="instructions">
+            <p>This tool helps process XMC exam files by transforming them between plaintext and encoded formats:</p>
+            <ol>
+                <li>Paste your plain content in the left textarea</li>
+                <li>Click "Encode" to generate an XMC file on the right</li>
+            </ol>
+            <p>The tool automatically handles:</p>
+            <ul>
+                <li>Converting bytes for processing</li>
+                <li>Applying the XOR encryption algorithm</li>
+                <li>Adding appropriate headers and footers</li>
+            </ul>
+            <p>Note: This tool assumes the key.bin file is already present in the repository.</p>
+        </div>
+    </details>
+
+    <div class="container">
+        <div class="input-area">
+            <div class="label">Plain Text</div>
+            <textarea id="inputText" placeholder="Paste plain content here..."></textarea>
+        </div>
+        <div class="output-area">
+            <div class="label">Output (Encoded XMC File)</div>
+            <textarea id="outputText" placeholder="Encoded content will appear here..." readonly></textarea>
+        </div>
+    </div>
+
+    <div class="buttons">
+        <button id="encodeBtn">Encode</button>
+        <button id="clearBtn">Clear Both</button>
+        <button id="copyBtn">Copy Output</button>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+        // Constants
+        const MODULUS = 65537;  // 0x10001
+        // Initial state array
+        const INITIAL_STATE = [
+            0x00002D70,  // state[0]
+            0x000036A7,  // state[1]
+            0x0000F859,  // state[2]
+            0x0000507F,  // state[3]
+            0x0000A32C,  // state[4]
+            0x00009A02,  // state[5]
+        ];
+
+        // DOM elements
+        const inputText = document.getElementById('inputText');
+        const outputText = document.getElementById('outputText');
+        const encodeBtn = document.getElementById('encodeBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const statusDiv = document.getElementById('status');
+
+        // Function to show a status message
+        function showStatus(message, isError = false) {
+            statusDiv.textContent = message;
+            statusDiv.className = isError ? 'error' : 'success';
+        }
+
+        // Convert bytes to ASCII hex string
+        function bytesToHexString(byteArray) {
+            return Array.from(byteArray)
+                .map(byte => byte.toString(16).padStart(2, '0'))
+                .join('');
+        }
+
+        // Function to encode plain text to XMC format
+        async function encodeXmc() {
+            try {
+                // Get the plain text
+                const plainText = inputText.value;
+                if (!plainText) {
+                    throw new Error("Please enter plain text in the input area to encode.");
+                }
+
+                // Convert text to bytes
+                const encoder = new TextEncoder();
+                const dataBytes = encoder.encode(plainText);
+                
+                try {
+                    // Simulate the encryption (without actually loading key.bin)
+                    // This just creates a mock encrypted result for demonstration
+                    showStatus("Processing text... (simulating encryption without key.bin)");
+
+                    // Create a mock encrypted output
+                    const mockEncryptedBytes = new Uint8Array(dataBytes.length);
+                    for (let i = 0; i < dataBytes.length; i++) {
+                        // Simple XOR with position (just for demonstration)
+                        mockEncryptedBytes[i] = dataBytes[i] ^ (i % 256);
+                    }
+                    
+                    // Convert encrypted bytes to hex string
+                    const encryptedHex = bytesToHexString(mockEncryptedBytes);
+                    
+                    // Format as XMC file content
+                    const setupBytes = `303A303030303530374630303030324437303A313A303030304133324330303030333641373A323A303030303941303230303030463835393A`;
+                    
+                    const xmcContent = 
+                        "; TEST CLASS: TEST ASSIGNMENT\n\n" +
+                        "; Name: Test User\n\n" +
+                        ":START:\n" +
+                        setupBytes +
+                        encryptedHex +
+                        "\n\nSAVING EXAM ... \n\n" +
+                        "; TEST CLASS: TEST ASSIGNMENT";
+                    
+                    // Display the result
+                    outputText.value = xmcContent;
+                    showStatus(`Successfully simulated encoding of ${dataBytes.length} bytes. (Note: This is just a simulation since key.bin must be loaded server-side)`);
+                    
+                } catch (error) {
+                    throw new Error(`Error during encoding simulation: ${error.message}`);
+                }
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, true);
+                console.error(error);
+            }
+        }
+
+        // Event listeners
+        encodeBtn.addEventListener('click', encodeXmc);
+        
+        clearBtn.addEventListener('click', () => {
+            inputText.value = '';
+            outputText.value = '';
+            showStatus('');
+        });
+        
+        copyBtn.addEventListener('click', () => {
+            outputText.select();
+            document.execCommand('copy');
+            showStatus('Output copied to clipboard!');
+        });
+    </script>
+</body>
+</html>
